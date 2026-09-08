@@ -1,0 +1,24 @@
+{
+  "manifest_version": 3,
+  "name": "HLS Stream Finder and Downloader",
+  "version": "1.0",
+  "description": "Detects stream playlists, allows copying index URLs, and initiates direct MP4 downloads.",
+  "permissions": [
+    "webRequest",
+    "storage",
+    "downloads",
+    "clipboardWrite",
+    "activeTab",
+    "scripting"
+  ],
+  "host_permissions": [
+    "<all_urls>"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "HLS Stream Finder"
+  }
+}
