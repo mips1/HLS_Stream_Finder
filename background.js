@@ -1,17 +1,10 @@
 const extensionApi = typeof browser !== "undefined" ? browser : chrome;
 
-// Listen to all network requests before headers are sent
-extensionApi.webRequest.onBeforeSendHeaders.addListener(
+extensionApi.webRequest.onBeforeRequest.addListener(
   (details) => {
     const url = details.url;
 
-    // Pattern 1: Target API endpoints returning sources
-    const isApiSource = url.includes('/api/') && (url.includes('/videos/') || url.includes('/episodes/') || url.endsWith('/sources'));
-    
-    // Pattern 2: Direct HLS manifest files
-    const isDirectPlaylist = url.includes('.m3u8') || url.includes('/index.json');
-
-    if (isApiSource || isDirectPlaylist) {
+    if (url.includes('.json') || url.includes('.m3u8') || url.includes('sources') || url.includes('/api/')) {
       processStreamUrl(url, details.tabId);
     }
   },
@@ -21,53 +14,59 @@ extensionApi.webRequest.onBeforeSendHeaders.addListener(
 async function processStreamUrl(url, tabId) {
   if (tabId < 0) return;
 
-  let finalPlaylistUrl = url;
+  let playlistUrl = url;
 
-  // If it's an API endpoint, attempt to fetch the JSON structure quietly
   if (url.includes('/api/')) {
     try {
-      const response = await fetch(url);
-      if (response.ok) {
-        const data = await response.json();
-        let hlsBase = null;
-
-        if (typeof data === 'string') {
-          const match = data.match(/https:\/\/[^"]+/);
-          if (match) hlsBase = match[0];
-        } else if (data && data.url) {
-          hlsBase = data.url;
-        }
-
-        if (hlsBase) {
-          finalPlaylistUrl = hlsBase.endsWith('/index.json') || hlsBase.endsWith('.m3u8') 
-            ? hlsBase 
-            : `${hlsBase.replace(/\/$/, '')}/index.json`;
-        }
+      const res = await fetch(url);
+      const data = await res.json();
+      if (data && data.url) playlistUrl = data.url;
+      else if (typeof data === 'string' && data.includes('http')) {
+        const match = data.match(/https?:\/\/[^"]+/);
+        if (match) playlistUrl = match[0];
       }
-    } catch (err) {
-      // Fall back to raw URL if JSON parsing fails
+    } catch (e) {
+      console.warn("API parse bypass, using raw URL:", e);
     }
   }
 
-  // Save detected stream URL to storage
-  await extensionApi.storage.local.set({ 
-    [`stream_${tabId}`]: finalPlaylistUrl, 
-    "latest_stream": finalPlaylistUrl 
-  });
-  
-  setReadyBadge(tabId);
-}
+  try {
+    const response = await fetch(playlistUrl);
+    if (!response.ok) return;
 
-// Re-apply badge on tab refresh
-extensionApi.tabs.onUpdated.addListener((tabId, changeInfo) => {
-  if (changeInfo.status === 'complete') {
-    extensionApi.storage.local.get([`stream_${tabId}`], (result) => {
-      if (result[`stream_${tabId}`]) {
-        setReadyBadge(tabId);
+    const text = await response.text();
+    let segments = [];
+    const baseUrl = playlistUrl.substring(0, playlistUrl.lastIndexOf('/') + 1);
+    const trimmedText = text.trim();
+
+    // Check manifest format explicitly before parsing
+    if (trimmedText.startsWith('{') || (playlistUrl.endsWith('.json') && !trimmedText.startsWith('#EXTM3U'))) {
+      const jsonData = JSON.parse(trimmedText);
+      if (jsonData.segments) {
+        segments = jsonData.segments.map(s => s.url.startsWith('http') ? s.url : baseUrl + s.url);
       }
-    });
+    } else if (trimmedText.startsWith('#EXTM3U') || playlistUrl.endsWith('.m3u8')) {
+      const lines = trimmedText.split('\n');
+      for (let line of lines) {
+        line = line.trim();
+        if (line && !line.startsWith('#')) {
+          segments.push(line.startsWith('http') ? line : baseUrl + line);
+        }
+      }
+    }
+
+    if (segments.length > 0) {
+      await extensionApi.storage.local.set({
+        [`stream_${tabId}`]: playlistUrl,
+        [`segments_${tabId}`]: segments
+      });
+      setReadyBadge(tabId);
+      console.log(`[HLS Interceptor Success]: Captured ${segments.length} segments for tab ${tabId}`);
+    }
+  } catch (err) {
+    console.error("Error processing stream URL:", err);
   }
-});
+}
 
 function setReadyBadge(tabId) {
   extensionApi.action.setBadgeBackgroundColor({ tabId: tabId, color: "#10B981" });
