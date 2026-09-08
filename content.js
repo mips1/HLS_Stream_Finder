@@ -1,65 +1,57 @@
-chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-  if (message.action === "EXECUTE_DOWNLOAD") {
-    downloadAndStitch(message.playlistUrl, message.pageTitle)
-      .then(() => sendResponse({ status: "SUCCESS" }))
-      .catch((err) => sendResponse({ status: "ERROR", error: err.message }));
-    return true;
-  }
-});
+(function () {
+  if (window.hlsDownloaderInjected) return;
+  window.hlsDownloaderInjected = true;
 
-async function downloadAndStitch(playlistUrl, pageTitle) {
-  const manifestRes = await fetch(playlistUrl);
-  if (!manifestRes.ok) throw new Error("Could not access stream playlist.");
-  
-  const manifestText = await manifestRes.text();
-  let segmentUrls = [];
-  const baseUrl = playlistUrl.substring(0, playlistUrl.lastIndexOf('/') + 1);
+  const extensionApi = typeof browser !== "undefined" ? browser : chrome;
 
-  if (manifestText.trim().startsWith('{') || manifestText.trim().startsWith('[')) {
-    const manifestData = JSON.parse(manifestText);
-    if (Array.isArray(manifestData.segments)) {
-      segmentUrls = manifestData.segments.map(s => s.url.startsWith('http') ? s.url : baseUrl + s.url);
-    } else if (manifestData.urls) {
-      segmentUrls = manifestData.urls.map(u => u.startsWith('http') ? u : baseUrl + u);
+  extensionApi.runtime.onMessage.addListener((request, sender, sendResponse) => {
+    if (request.action === "startDownload" && request.segments) {
+      downloadSegments(request.segments);
     }
-  } else {
-    const lines = manifestText.split('\n');
-    segmentUrls = lines
-      .map(line => line.trim())
-      .filter(line => line && !line.startsWith('#'))
-      .map(line => line.startsWith('http') ? line : baseUrl + line);
+  });
+
+  async function downloadSegments(segments) {
+    const total = segments.length;
+    const blobs = [];
+
+    for (let i = 0; i < total; i++) {
+      try {
+        const response = await fetch(segments[i]);
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        
+        const blob = await response.blob();
+        blobs.push(blob);
+
+        // Report progress back to popup
+        extensionApi.runtime.sendMessage({
+          action: "downloadProgress",
+          current: i + 1,
+          total: total
+        }).catch(() => {}); // Ignore error if popup closes during download
+      } catch (err) {
+        console.error(`[HLS Downloader] Failed segment ${i + 1}:`, err);
+      }
+    }
+
+    if (blobs.length === 0) {
+      extensionApi.runtime.sendMessage({ action: "downloadError", message: "Failed to download segments." }).catch(() => {});
+      return;
+    }
+
+    // Report merging phase
+    extensionApi.runtime.sendMessage({ action: "downloadMerging" }).catch(() => {});
+
+    const finalBlob = new Blob(blobs, { type: 'video/mp4' });
+    const downloadUrl = URL.createObjectURL(finalBlob);
+
+    const a = document.createElement('a');
+    a.href = downloadUrl;
+    a.download = `video_${Date.now()}.mp4`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(downloadUrl);
+
+    extensionApi.runtime.sendMessage({ action: "downloadComplete" }).catch(() => {});
   }
-
-  if (segmentUrls.length === 0) {
-    throw new Error("No media segments found in manifest.");
-  }
-
-  const chunks = [];
-  for (let i = 0; i < segmentUrls.length; i++) {
-    chrome.runtime.sendMessage({
-      action: "UPDATE_PROGRESS",
-      current: i + 1,
-      total: segmentUrls.length
-    }).catch(() => {});
-
-    const segRes = await fetch(segmentUrls[i]);
-    if (!segRes.ok) throw new Error(`Failed to download segment ${i + 1}`);
-
-    const segBuffer = await segRes.arrayBuffer();
-    chunks.push(segBuffer);
-  }
-
-  // Generate downloadable Blob inside page context
-  const mergedBlob = new Blob(chunks, { type: 'video/mp4' });
-  const blobUrl = URL.createObjectURL(mergedBlob);
-  const cleanTitle = pageTitle.replace(/[^a-zA-Z0-9]/g, '_').replace(/_+/g, '_');
-  
-  // Trigger DOM link click save directly
-  const a = document.createElement('a');
-  a.href = blobUrl;
-  a.download = `${cleanTitle || 'stream_video'}.mp4`;
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
-  URL.revokeObjectURL(blobUrl);
-}
+})();
