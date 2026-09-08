@@ -5,19 +5,34 @@ document.addEventListener('DOMContentLoaded', async () => {
   const statusEl = document.getElementById('status');
   const downloadBtn = document.getElementById('downloadBtn');
   const copyBtn = document.getElementById('copyBtn');
+  const progressContainer = document.getElementById('progressContainer');
+  const progressFill = document.getElementById('progressFill');
 
   // Listen for live progress updates from content.js
   extensionApi.runtime.onMessage.addListener((message) => {
     if (message.action === "downloadProgress") {
-      statusEl.textContent = `Downloading segment ${message.current} of ${message.total}...`;
+      const percent = Math.round((message.current / message.total) * 100);
+      statusEl.textContent = `Downloading segment ${message.current} of ${message.total} (${percent}%)...`;
+      
+      if (progressContainer) progressContainer.style.display = "block";
+      if (progressFill) progressFill.style.width = `${percent}%`;
+
     } else if (message.action === "downloadMerging") {
       statusEl.textContent = "Merging segments into MP4 file...";
+      if (progressFill) progressFill.style.width = "100%";
+
     } else if (message.action === "downloadComplete") {
       statusEl.textContent = "Download complete!";
       if (downloadBtn) downloadBtn.disabled = false;
+      setTimeout(() => {
+        if (progressContainer) progressContainer.style.display = "none";
+        if (progressFill) progressFill.style.width = "0%";
+      }, 3000);
+
     } else if (message.action === "downloadError") {
       statusEl.textContent = message.message || "Download failed.";
       if (downloadBtn) downloadBtn.disabled = false;
+      if (progressContainer) progressContainer.style.display = "none";
     }
   });
 
@@ -38,6 +53,8 @@ document.addEventListener('DOMContentLoaded', async () => {
         downloadBtn.onclick = () => {
           downloadBtn.disabled = true;
           statusEl.textContent = `Starting download (0 of ${segments.length})...`;
+          if (progressContainer) progressContainer.style.display = "block";
+          if (progressFill) progressFill.style.width = "0%";
           
           extensionApi.scripting.executeScript({
             target: { tabId: tab.id },
