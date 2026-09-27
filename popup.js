@@ -5,6 +5,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   const statusEl = document.getElementById('status');
   const downloadBtn = document.getElementById('downloadBtn');
   const copyBtn = document.getElementById('copyBtn');
+  const ytDlpBtn = document.getElementById('ytDlpBtn');
   const progressContainer = document.getElementById('progressContainer');
   const progressFill = document.getElementById('progressFill');
 
@@ -48,6 +49,10 @@ document.addEventListener('DOMContentLoaded', async () => {
         copyBtn.disabled = false;
         copyBtn.style.cursor = "pointer";
       }
+      if (ytDlpBtn) {
+        ytDlpBtn.disabled = false;
+        ytDlpBtn.style.cursor = "pointer";
+      }
 
       if (downloadBtn) {
         downloadBtn.onclick = () => {
@@ -74,12 +79,28 @@ document.addEventListener('DOMContentLoaded', async () => {
           });
         };
       }
+
+      if (ytDlpBtn) {
+        ytDlpBtn.onclick = () => {
+          const referer = new URL(tab.url).origin + "/";
+          const command = `yt-dlp --referer ${JSON.stringify(referer)} ${JSON.stringify(streamUrl)}`;
+          navigator.clipboard.writeText(command).then(() => {
+            const origText = ytDlpBtn.textContent;
+            ytDlpBtn.textContent = "Copied!";
+            setTimeout(() => { ytDlpBtn.textContent = origText; }, 2000);
+          });
+        };
+      }
     } else {
       statusEl.textContent = "No stream detected on this page yet. Play the video to detect sources.";
       if (downloadBtn) downloadBtn.disabled = true;
       if (copyBtn) {
         copyBtn.disabled = true;
         copyBtn.style.cursor = "not-allowed";
+      }
+      if (ytDlpBtn) {
+        ytDlpBtn.disabled = true;
+        ytDlpBtn.style.cursor = "not-allowed";
       }
     }
   });

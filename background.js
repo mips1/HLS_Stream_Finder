@@ -20,7 +20,7 @@ async function processStreamUrl(url, tabId) {
     try {
       const res = await fetch(url);
       const data = await res.json();
-      if (data && data.url) playlistUrl = data.url;
+      if (data?.sources?.[0]?.file) playlistUrl = data.sources[0].file; else if (data?.url) playlistUrl = data.url;
       else if (typeof data === 'string' && data.includes('http')) {
         const match = data.match(/https?:\/\/[^"]+/);
         if (match) playlistUrl = match[0];
