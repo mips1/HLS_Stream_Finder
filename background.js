@@ -4,7 +4,7 @@ extensionApi.webRequest.onBeforeRequest.addListener(
   (details) => {
     const url = details.url;
 
-    if (url.includes('.json') || url.includes('.m3u8') || url.includes('sources') || url.includes('/api/')) {
+    if (url.includes('.json') || url.includes('.m3u8') || url.includes('sources')) {
       processStreamUrl(url, details.tabId);
     }
   },
@@ -15,20 +15,6 @@ async function processStreamUrl(url, tabId) {
   if (tabId < 0) return;
 
   let playlistUrl = url;
-
-  if (url.includes('/api/')) {
-    try {
-      const res = await fetch(url);
-      const data = await res.json();
-      if (data?.sources?.[0]?.file) playlistUrl = data.sources[0].file; else if (data?.url) playlistUrl = data.url;
-      else if (typeof data === 'string' && data.includes('http')) {
-        const match = data.match(/https?:\/\/[^"]+/);
-        if (match) playlistUrl = match[0];
-      }
-    } catch (e) {
-      console.warn("API parse bypass, using raw URL:", e);
-    }
-  }
 
   try {
     const response = await fetch(playlistUrl);
@@ -56,6 +42,10 @@ async function processStreamUrl(url, tabId) {
     }
 
     if (segments.length > 0) {
+      const stored = await extensionApi.storage.local.get(null);
+      const oldKeys = Object.keys(stored).filter(k => k.startsWith("stream_") || k.startsWith("segments_"));
+      if (oldKeys.length) await extensionApi.storage.local.remove(oldKeys);
+
       await extensionApi.storage.local.set({
         [`stream_${tabId}`]: playlistUrl,
         [`segments_${tabId}`]: segments
